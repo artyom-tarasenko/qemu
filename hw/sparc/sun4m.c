@@ -1173,6 +1173,19 @@ static void ss10_class_init(ObjectClass *oc, void *data)
         .apc_base     = 0xefa000000ULL, /* XXX should not exist */
         .aux1_base    = 0xff1800000ULL,
         .aux2_base    = 0xff1a01000ULL,
+        .vsimm        = {
+            {
+                .reg_base  = 0x90000000ULL,
+                .vram_base = 0xf0000000ULL
+            }, {
+                .reg_base  = 0x94000000ULL,
+                .vram_base = 0xf4000000ULL
+            }, {
+                .reg_base  = 0x98000000ULL
+            }, {
+                .reg_base  = 0x9c000000ULL
+            }
+        },
         .ecc_base     = 0xf00000000ULL,
         .ecc_version  = 0x10000000, /* version 0, implementation 1 */
         .nvram_machine_id = 0x72,

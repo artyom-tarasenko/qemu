@@ -4,6 +4,7 @@ config SUN4M
     depends on SPARC && !SPARC64
     imply TCX
     imply CG3
+    imply CG14
     select CS4231
     select ECCMEMCTL
     select EMPTY_SLOT

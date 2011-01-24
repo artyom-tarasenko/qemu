@@ -4,6 +4,7 @@
 #
 #CONFIG_TCX=n
 #CONFIG_CG3=n
+#CONFIG_CG14=n
 
 # Boards are selected by default, uncomment to keep out of the build.
 # CONFIG_SUN4M=n

@@ -557,6 +557,21 @@ static void cg3_init(hwaddr addr, qemu_irq irq, int vram_size, int width,
     sysbus_connect_irq(s, 0, irq);
 }
 
+static void cg14_init(hwaddr ctrl_base, hwaddr vram_base,
+                      int width, int height)
+{
+    DeviceState *dev;
+    SysBusDevice *s;
+
+    dev = qdev_new("cg14");
+    qdev_prop_set_uint16(dev, "width", width);
+    qdev_prop_set_uint16(dev, "height", height);
+    s = SYS_BUS_DEVICE(dev);
+    sysbus_realize_and_unref(s, &error_fatal);
+    sysbus_mmio_map(s, 0, ctrl_base);
+    sysbus_mmio_map(s, 1, vram_base);
+}
+
 /* NCR89C100/MACIO Internal ID register */
 
 #define TYPE_MACIO_ID_REGISTER "macio_idreg"
@@ -917,6 +932,11 @@ static void sun4m_hw_init(MachineState *machine)
             /* sbus irq 5 */
             cg3_init(hwdef->tcx_base, slavio_irq[11], 0x00100000,
                      graphic_width, graphic_height, graphic_depth);
+            vga_interface_created = true;
+        } else if (hwdef->vsimm[0].vram_base &&
+                   (graphic_width > 1024 || !hwdef->tcx_base)) {
+            cg14_init(hwdef->vsimm[0].reg_base, hwdef->vsimm[0].vram_base,
+                      graphic_width, graphic_height);
             vga_interface_created = true;
         } else {
             /* If no display specified, default to TCX */

@@ -2341,9 +2341,13 @@ void sparc_cpu_unassigned_access(CPUState *cs, hwaddr addr,
 #endif
 
     if (is_exec) {
-        helper_raise_exception(env, TT_CODE_ACCESS);
+        if (env->lsu & (IMMU_E)) {
+            helper_raise_exception(env, TT_CODE_ACCESS);
+        }
     } else {
-        helper_raise_exception(env, TT_DATA_ACCESS);
+        if (env->lsu & (DMMU_E)) {
+                helper_raise_exception(env, TT_DATA_ACCESS);
+        }
     }
 }
 #endif

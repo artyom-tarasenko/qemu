@@ -1899,6 +1899,8 @@ PCIDevice *pci_vga_init(PCIBus *bus)
         return pci_create_simple(bus, -1, "vmware-svga");
     case VGA_VIRTIO:
         return pci_create_simple(bus, -1, "virtio-vga");
+    case VGA_S3:
+        return pci_create_simple(bus, -1, "s3-trio");
     case VGA_NONE:
     default: /* Other non-PCI types. Checking for unsupported types is already
                 done in vl.c. */

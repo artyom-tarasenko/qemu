@@ -244,6 +244,7 @@ static struct {
     { .driver = "vmware-svga",          .flag = &default_vga       },
     { .driver = "qxl-vga",              .flag = &default_vga       },
     { .driver = "virtio-vga",           .flag = &default_vga       },
+    { .driver = "s3-trio",              .flag = &default_vga       },
 };
 
 static QemuOptsList qemu_rtc_opts = {
@@ -1991,6 +1992,11 @@ static VGAInterfaceInfo vga_interfaces[VGA_TYPE_MAX] = {
     },
     [VGA_XENFB] = {
         .opt_name = "xenfb",
+    },
+    [VGA_S3] = {
+        .opt_name = "s3",
+        .name = "S3 Trio",
+        .class_names = { "s3-trio" },
     },
 };
 

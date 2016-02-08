@@ -443,6 +443,8 @@ struct CPUSPARCState {
             uint64_t sfar;
             uint64_t tsb;
             uint64_t tag_access;
+            uint64_t virtual_watchpoint;
+            uint64_t physical_watchpoint;
         } immu;
     };
     union {
@@ -455,6 +457,8 @@ struct CPUSPARCState {
             uint64_t sfar;
             uint64_t tsb;
             uint64_t tag_access;
+            uint64_t virtual_watchpoint;
+            uint64_t physical_watchpoint;
         } dmmu;
     };
     SparcTLBEntry itlb[64];

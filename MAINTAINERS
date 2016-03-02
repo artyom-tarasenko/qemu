@@ -1014,6 +1014,12 @@ M: Dmitry Fleytman <dmitry@daynix.com>
 S: Maintained
 F: hw/net/e1000e*
 
+sun4v RTC
+M: Artyom Tarasenko <atar4qemu@gmail.com>
+S: Maintained
+F: hw/timer/sun4v-rtc.c
+F: include/hw/timer/sun4v-rtc.h
+
 Subsystems
 ----------
 Audio

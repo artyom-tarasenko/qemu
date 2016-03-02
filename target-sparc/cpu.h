@@ -699,10 +699,10 @@ static inline int cpu_mmu_index(CPUSPARCState *env1, bool ifetch)
 #elif !defined(TARGET_SPARC64)
     return env1->psrs;
 #else
-    if (env1->tl > 0) {
-        return MMU_NUCLEUS_IDX;
-    } else if (cpu_hypervisor_mode(env1)) {
+    if (cpu_hypervisor_mode(env1)) {
         return MMU_HYPV_IDX;
+    } else if (env1->tl > 0) {
+        return MMU_NUCLEUS_IDX;
     } else if (cpu_supervisor_mode(env1)) {
         return MMU_KERNEL_IDX;
     } else {

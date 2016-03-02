@@ -1074,6 +1074,12 @@ S: Maintained
 F: hw/core/generic-loader.c
 F: include/hw/core/generic-loader.h
 
+sun4v RTC
+M: Artyom Tarasenko <atar4qemu@gmail.com>
+S: Maintained
+F: hw/timer/sun4v-rtc.c
+F: include/hw/timer/sun4v-rtc.h
+
 Subsystems
 ----------
 Audio

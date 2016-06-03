@@ -1766,6 +1766,9 @@ void helper_st_asi(CPUSPARCState *env, target_ulong addr, target_ulong val,
     case ASI_REAL_IO_L: /* Bypass, non-cacheable LE */
     case ASI_PL: /* Primary LE */
     case ASI_SL: /* Secondary LE */
+    case ASI_TWINX_AIUS_L: /* 0x2b, ASI_STBI_AIUS_L */
+    case ASI_TWINX_PL: /* 0xea ASI_ST_BLKINIT_PRIMARY_LITTLE */
+    case ASI_TWINX_SL: /* 0xeb ASI_ST_BLKINIT_SECONDARY_LITTLE */
         switch (size) {
         case 2:
             val = bswap16(val);
@@ -1784,6 +1787,14 @@ void helper_st_asi(CPUSPARCState *env, target_ulong addr, target_ulong val,
     }
 
     switch (asi) {
+    case ASI_TWINX_AIUP: /* 0x22 ASI_STBI_AIUP */
+    case ASI_TWINX_AIUP_L: /* 0x2a ASI_STBI_AIUPL_L */
+    case ASI_TWINX_AIUS: /* 0x23 ASI_STBI_AIUS */
+    case ASI_TWINX_AIUS_L: /* 0x2b ASI_STBI_AIUS_L */
+    case ASI_BLK_INIT_QUAD_LDD_P: /* 0xe2 Primary block init */
+    case ASI_BLK_INIT_QUAD_LDD_S: /* 0xe3 Secondary block init */
+    case ASI_TWINX_PL: /* 0xea ASI_ST_BLKINIT_PRIMARY_LITTLE */
+    case ASI_TWINX_SL: /* 0xeb ASI_ST_BLKINIT_SECONDARY_LITTLE */
     case ASI_AIUP:  /* As if user primary */
     case ASI_AIUS:  /* As if user secondary */
     case ASI_AIUPL: /* As if user primary LE */
@@ -2154,19 +2165,8 @@ void helper_st_asi(CPUSPARCState *env, target_ulong addr, target_ulong val,
         return;
     case ASI_NUCLEUS_QUAD_LDD:   /* Nucleus quad LDD 128 bit atomic */
     case ASI_NUCLEUS_QUAD_LDD_L: /* Nucleus quad LDD 128 bit atomic LE */
-    case ASI_TWINX_AIUP:   /* As if user primary, twinx */
-    case ASI_TWINX_AIUS:   /* As if user secondary, twinx */
     case ASI_TWINX_REAL:   /* Real address, twinx */
-    case ASI_TWINX_AIUP_L: /* As if user primary, twinx, LE */
-    case ASI_TWINX_AIUS_L: /* As if user secondary, twinx, LE */
     case ASI_TWINX_REAL_L: /* Real address, twinx, LE */
-    case ASI_TWINX_N:  /* Nucleus, twinx */
-    case ASI_TWINX_NL: /* Nucleus, twinx, LE */
-    /* ??? From the UA2011 document; overlaps BLK_INIT_QUAD_LDD_* */
-    case ASI_TWINX_P:  /* Primary, twinx */
-    case ASI_TWINX_PL: /* Primary, twinx, LE */
-    case ASI_TWINX_S:  /* Secondary, twinx */
-    case ASI_TWINX_SL: /* Secondary, twinx, LE */
         /* Only stda allowed */
         helper_raise_exception(env, TT_ILL_INSN);
         return;

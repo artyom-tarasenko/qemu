@@ -4404,8 +4404,9 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                                 break;
                             case 16: // UA2005 gl
                                 CHECK_IU_FEATURE(dc, GL);
-                                tcg_gen_st32_tl(cpu_tmp0, cpu_env,
-                                                offsetof(CPUSPARCState, gl));
+                                save_state(dc);
+                                gen_helper_wrgl(cpu_env, cpu_tmp0);
+                                dc->npc = DYNAMIC_PC;
                                 break;
                             case 26: // UA2005 strand status
                                 CHECK_IU_FEATURE(dc, HYPV);

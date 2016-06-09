@@ -1295,10 +1295,9 @@ uint64_t helper_ld_asi(CPUSPARCState *env, target_ulong addr,
 
     asi &= 0xff;
 
-    if ((asi < 0x80 && (env->pstate & PS_PRIV) == 0)
-        || (cpu_has_hypervisor(env)
-            && asi >= 0x30 && asi < 0x80
-            && !(env->hpstate & HS_PRIV))) {
+    if (((!cpu_hypervisor_mode(env)) && asi < 0x80)
+        && (((env->pstate & PS_PRIV) == 0)
+        || (cpu_has_hypervisor(env) && asi >= 0x30))) {
         helper_raise_exception(env, TT_PRIV_ACT);
     }
 
@@ -1727,10 +1726,9 @@ void helper_st_asi(CPUSPARCState *env, target_ulong addr, target_ulong val,
 
     asi &= 0xff;
 
-    if ((asi < 0x80 && (env->pstate & PS_PRIV) == 0)
-        || (cpu_has_hypervisor(env)
-            && asi >= 0x30 && asi < 0x80
-            && !(env->hpstate & HS_PRIV))) {
+    if (((!cpu_hypervisor_mode(env)) && asi < 0x80)
+        && (((env->pstate & PS_PRIV) == 0)
+        || (cpu_has_hypervisor(env) && asi >= 0x30))) {
         helper_raise_exception(env, TT_PRIV_ACT);
     }
 

@@ -498,7 +498,8 @@ static int get_physical_address_data(CPUSPARCState *env,
     int is_user = (mmu_idx == MMU_USER_IDX ||
                    mmu_idx == MMU_USER_SECONDARY_IDX);
 
-    if ((env->lsu & DMMU_E) == 0) { /* DMMU disabled */
+    if ((env->lsu & DMMU_E) == 0 || cpu_hypervisor_mode(env)) {
+        /* direct translation VA -> PA */
         *physical = ultrasparc_truncate_physical(address);
         *prot = PAGE_READ | PAGE_WRITE;
         return 0;
@@ -617,8 +618,9 @@ static int get_physical_address_code(CPUSPARCState *env,
     int is_user = (mmu_idx == MMU_USER_IDX ||
                    mmu_idx == MMU_USER_SECONDARY_IDX);
 
-    if ((env->lsu & IMMU_E) == 0 || (env->pstate & PS_RED) != 0) {
-        /* IMMU disabled */
+    if (((env->lsu & IMMU_E) == 0) || (env->pstate & PS_RED) != 0
+        || cpu_hypervisor_mode(env)) {
+        /* direct translation VA -> PA */
         *physical = ultrasparc_truncate_physical(address);
         *prot = PAGE_EXEC;
         return 0;

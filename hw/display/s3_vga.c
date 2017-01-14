@@ -978,7 +978,7 @@ static void s3_trio_class_init(ObjectClass *klass, void *data)
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
     k->realize = s3_trio_realize;
-    k->romfile = "vgabios-s3.bin";
+    //k->romfile = "vgabios-s3.bin";
     k->vendor_id = PCI_VENDOR_ID_S3;
     k->device_id = PCI_DEVICE_ID_S3_TRIO;
     k->class_id = PCI_CLASS_DISPLAY_VGA;

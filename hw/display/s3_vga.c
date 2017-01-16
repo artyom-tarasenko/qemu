@@ -182,6 +182,7 @@ typedef struct S3TrioState {
 #define pattern_l     mfc[8]
 #define pattern_h     mfc[9]
 #define pix_cntl      mfc[10]
+#define color_compare mfc[14]
 
 static inline int address_to_reg(uint32_t addr)
 {
@@ -251,6 +252,14 @@ static void do_cmd_write_one_pixel(S3TrioState *s, uint8_t value)
     uint32_t offset;
     uint8_t* p8;
     int width, height;
+
+    if (s->color_compare & 0x100) {
+        if ((s->color_compare & 0x80) == 0x80 && s->color_cmp != value) {
+            return;
+        } else if ((s->color_compare & 0x80) == 0x00 && s->color_cmp == value) {
+            return;
+        }
+    }
 
     s->vga.get_resolution(&s->vga, &width, &height);
 
@@ -411,6 +420,7 @@ static void do_cmd(S3TrioState *s)
         }
         break;
 // 40f3 = CMD_CMD_RECT | CMD_INC_Y | CMD_YMAJAXIS | CMD_INC_X | CMD_DRAW | CMD_PLANAR | CMD_WRTDATA
+// 4331 = CMD_CMD_RECT | CMD_16BIT | CMD_PCDATA | CMD_INC_X | CMD_DRAW | CMD_WRTDATA
     case CMD_CMD_RECT:
         trace_s3_vga_cmd_rect(s->cur_x, s->cur_y, s->cmd & CMD_INC_X ? 1 : -1,
                               s->cmd & CMD_INC_Y ? 1 : -1, s->maj_axis_pcnt,
@@ -563,7 +573,7 @@ static uint16_t* s3_trio_get_register(S3TrioState *s, uint32_t addr, int is_writ
     case REG_FRGD_MIX:
         p = is_write ? &s->frgd_mix : NULL;
         break;
-     case REG_MULTIFUNC_CNTL:
+    case REG_MULTIFUNC_CNTL:
         if (is_write) {
             p = &s->mfc[(*val_if_write >> 12) & 0xf];
             *val_if_write &= 0x0fff;

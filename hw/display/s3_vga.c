@@ -173,6 +173,9 @@ typedef struct S3TrioState {
     uint8_t unlock_control_registers_2;
 } S3TrioState;
 
+/* FIXME: remove forward declarations */
+static uint16_t get_color_from_mix(S3TrioState *s, uint16_t mix);
+
 #define min_axis_pcnt mfc[0]
 #define scissors_t    mfc[1]
 #define scissors_l    mfc[2]
@@ -274,6 +277,9 @@ static void do_cmd_write_one_pixel(S3TrioState *s, uint8_t value)
 
 static void do_cmd_write_pixel(S3TrioState *s, uint16_t value)
 {
+    int i, size;
+    uint16_t color;
+
     if (!(s->gp_stat & GP_STAT_BUSY)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "s3_trio: %s called while GP_STAT_BUSY not set\n",
@@ -281,13 +287,25 @@ static void do_cmd_write_pixel(S3TrioState *s, uint16_t value)
         return;
     }
 
-    // FIXME: handle s->cmd & CMD_PLANAR
-    if (s->cmd & CMD_16BIT) {
-        do_cmd_write_one_pixel(s, value >> 8);
+    if (s->cmd & CMD_PLANAR) {
+        size = (s->cmd & CMD_16BIT) ? 16 : 8;
+        for (i = 0; i < size; i++) {
+            if (value & (1 << (size - i - 1))) {
+                color = get_color_from_mix(s, s->frgd_mix);
+            } else {
+                color = get_color_from_mix(s, s->bkgd_mix);
+            }
+            do_cmd_write_one_pixel(s, color);
+            move_to_next_pixel(s);
+        }
+    } else {
+        if (s->cmd & CMD_16BIT) {
+            do_cmd_write_one_pixel(s, value >> 8);
+            move_to_next_pixel(s);
+        }
+        do_cmd_write_one_pixel(s, value & 0xff);
         move_to_next_pixel(s);
     }
-    do_cmd_write_one_pixel(s, value & 0xff);
-    move_to_next_pixel(s);
 }
 
 static uint16_t get_current_source_bitmap(S3TrioState *s)
@@ -357,6 +375,10 @@ static uint16_t get_background_color(S3TrioState *s)
 
 static uint16_t get_color(S3TrioState *s)
 {
+    if (s->cmd & CMD_PLANAR && s->cmd & CMD_PCDATA) {
+        return s->pix_trans;
+    }
+
     switch (s->pix_cntl & PIX_CNTL_MIXSEL_MASK) {
     case PIX_CNTL_MIXSEL_FOREMIX:
         return get_foreground_color(s);
@@ -421,6 +443,7 @@ static void do_cmd(S3TrioState *s)
         break;
 // 40f3 = CMD_CMD_RECT | CMD_INC_Y | CMD_YMAJAXIS | CMD_INC_X | CMD_DRAW | CMD_PLANAR | CMD_WRTDATA
 // 4331 = CMD_CMD_RECT | CMD_16BIT | CMD_PCDATA | CMD_INC_X | CMD_DRAW | CMD_WRTDATA
+// 51b3 = CMD_CMD_RECT | CMD_BYTSEQ | CMD_PCDATA | CMD_INC_Y | CMD_INC_X | CMD_DRAW | CMD_PLANAR | CMD_WRTDATA
     case CMD_CMD_RECT:
         trace_s3_vga_cmd_rect(s->cur_x, s->cur_y, s->cmd & CMD_INC_X ? 1 : -1,
                               s->cmd & CMD_INC_Y ? 1 : -1, s->maj_axis_pcnt,
@@ -641,6 +664,9 @@ static void s3_trio_post_write(S3TrioState* s, uint32_t addr)
     case REG_SUBSYS_CNTL:
         s->subsys_cntl &= ~(1 << 12); /* clear CHPTST */
         break;
+    case REG_PIX_TRANS:
+        do_cmd_write_pixel(s, get_color(s));
+        break;
     case REG_CMD:
         do_cmd(s);
         break;
@@ -663,21 +689,7 @@ static void s3_trio_ioport_writeb(void *opaque, uint32_t addr, uint32_t val)
         c[~addr & 1] = val;
     }
 
-    switch (address_to_reg(addr & ~0x1)) {
-    case REG_PIX_TRANS:
-        if (s->cmd & CMD_16BIT) {
-            qemu_log_mask(LOG_GUEST_ERROR,
-                          "s3_trio: invalid 8-bit PIX_TRANS access (0x%04x)\n",
-                          addr);
-        } else {
-            qemu_log_mask(LOG_UNIMP,
-                          "s3_trio: unimplemented 8-bit PIX_TRANS access\n");
-        }
-        break;
-    default:
-        s3_trio_post_write(s, addr & ~0x1);
-        break;
-    }
+    s3_trio_post_write(s, addr & ~0x1);
 }
 
 static void s3_trio_ioport_writew(void *opaque, uint32_t addr, uint32_t val)
@@ -691,24 +703,8 @@ static void s3_trio_ioport_writew(void *opaque, uint32_t addr, uint32_t val)
     if (p) {
         *p = val & 0xffff;
     }
-    switch (address_to_reg(addr)) {
-    case REG_PIX_TRANS:
-        if (!(s->cmd & CMD_16BIT)) {
-            qemu_log_mask(LOG_GUEST_ERROR,
-                          "s3_trio: invalid 16-bit PIX_TRANS access (0x%04x)\n",
-                          addr);
-        } else {
-            if (s->cmd & CMD_BYTSEQ) {
-                /* invert high and low bytes */
-                val = bswap16(val);
-            }
-            do_cmd_write_pixel(s, get_color(s));
-        }
-        break;
-    default:
-        s3_trio_post_write(s, addr & ~0x1);
-        break;
-    }
+
+    s3_trio_post_write(s, addr & ~0x1);
 }
 
 static uint32_t s3_trio_vga_ioport_read(void *opaque, uint32_t addr)

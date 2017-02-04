@@ -375,8 +375,10 @@ static uint16_t get_background_color(S3TrioState *s)
 
 static uint16_t get_color(S3TrioState *s)
 {
-    if (s->cmd & CMD_PLANAR && s->cmd & CMD_PCDATA) {
-        return s->pix_trans;
+    assert(!(s->cmd & CMD_PCDATA));
+
+    if (s->cmd & CMD_PLANAR) {
+        return 0xffff;
     }
 
     switch (s->pix_cntl & PIX_CNTL_MIXSEL_MASK) {
@@ -441,9 +443,6 @@ static void do_cmd(S3TrioState *s)
             }
         }
         break;
-// 40f3 = CMD_CMD_RECT | CMD_INC_Y | CMD_YMAJAXIS | CMD_INC_X | CMD_DRAW | CMD_PLANAR | CMD_WRTDATA
-// 4331 = CMD_CMD_RECT | CMD_16BIT | CMD_PCDATA | CMD_INC_X | CMD_DRAW | CMD_WRTDATA
-// 51b3 = CMD_CMD_RECT | CMD_BYTSEQ | CMD_PCDATA | CMD_INC_Y | CMD_INC_X | CMD_DRAW | CMD_PLANAR | CMD_WRTDATA
     case CMD_CMD_RECT:
         trace_s3_vga_cmd_rect(s->cur_x, s->cur_y, s->cmd & CMD_INC_X ? 1 : -1,
                               s->cmd & CMD_INC_Y ? 1 : -1, s->maj_axis_pcnt,
@@ -665,7 +664,7 @@ static void s3_trio_post_write(S3TrioState* s, uint32_t addr)
         s->subsys_cntl &= ~(1 << 12); /* clear CHPTST */
         break;
     case REG_PIX_TRANS:
-        do_cmd_write_pixel(s, get_color(s));
+        do_cmd_write_pixel(s, s->pix_trans);
         break;
     case REG_CMD:
         do_cmd(s);

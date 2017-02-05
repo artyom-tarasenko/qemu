@@ -400,7 +400,51 @@ static uint16_t get_color(S3TrioState *s)
     }
 }
 
-static inline void do_cmd_init(S3TrioState *s)
+static void s3_do_cmd_bitblt(S3TrioState *s)
+{
+    int dx, dy, x, y, srcx, srcy, destx, desty;
+    uint16_t x1 = s->cur_x;
+    uint16_t y1 = s->cur_y;
+    uint16_t x2 = s->destx_diastp;
+    uint16_t y2 = s->desty_axstep;
+    uint16_t width = s->maj_axis_pcnt;
+    uint16_t height = s->min_axis_pcnt;
+    uint8_t *p8_src, *p8_dest;
+    int res_width, res_height;
+
+    s->vga.get_resolution(&s->vga, &res_width, &res_height);
+
+    if (x1 > x2) {
+        dx = 1;
+        srcx = x1;
+        destx = x2;
+    } else {
+        dx = -1;
+        srcx = x1 + width - 1;
+        destx = x2 + width - 1;
+    }
+    if (y1 > y2) {
+        dy = 1;
+        srcy = y1;
+        desty = y2;
+    } else {
+        dy = -1;
+        srcy = y1 + height - 1;
+        desty = y2 + height - 1;
+    }
+    for (y = 0; y < height; y++) {
+        p8_src = s->vga.vram_ptr + (srcy + y * dy) * res_width + srcx;
+        p8_dest = s->vga.vram_ptr + (desty + y * dy) * res_width + destx;
+        for (x = 0; x < width; x++) {
+            *p8_dest = *p8_src;
+            memory_region_set_dirty(&s->vga.vram, p8_dest - s->vga.vram_ptr, 1);
+            p8_src += dx;
+            p8_dest += dx;
+        }
+    }
+}
+
+static void do_cmd_init(S3TrioState *s)
 {
     s->gp_stat |= GP_STAT_BUSY;
     s->maj_axis = 0;
@@ -466,8 +510,9 @@ static void do_cmd(S3TrioState *s)
                       s->cmd);
         break;
     case CMD_CMD_BITBLT:
-        qemu_log_mask(LOG_UNIMP, "s3_trio: CMD_BITBLT not implemented (%04x)\n",
-                      s->cmd);
+        trace_s3_vga_cmd_bitblt(s->cur_x, s->cur_y, s->destx_diastp, s->desty_axstep,
+                                s->maj_axis_pcnt, s->min_axis_pcnt);
+        s3_do_cmd_bitblt(s);
         break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "s3_trio: illegal command %04x\n",

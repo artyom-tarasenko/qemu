@@ -132,6 +132,9 @@ typedef struct S3TrioState {
     uint16_t maj_axis, min_axis;
     PortioList portio;
 
+    uint32_t dclk;
+    uint32_t mclk;
+
     uint16_t disp_stat; /* 02e8 */
     uint16_t h_disp; /* 06e8 */
     uint16_t h_sync_strt; /* 0ae8 */
@@ -791,6 +794,30 @@ static uint32_t s3_trio_vga_ioport_read(void *opaque, uint32_t addr)
             break;
         }
         break;
+    case VGA_SEQ_D:
+        switch (s->vga.sr_index) {
+        case 0x17: /* CLKSYN */
+        {
+            uint32_t *clk;
+            if (!(s->vga.sr[0x14] & 0x01)) {
+                s->dclk++;
+            }
+            if (!(s->vga.sr[0x14] & 0x03)) {
+                s->mclk++;
+            }
+            if (s->vga.sr[0x14] & 0x04) {
+                clk = &s->mclk;
+            } else {
+                clk = &s->dclk;
+            }
+            val = (*clk) & 0xff;
+            break;
+        }
+        default:
+            val = vga_ioport_read(&s->vga, addr);
+            break;
+        }
+        break;
     default:
         val = vga_ioport_read(&s->vga, addr);
         break;
@@ -842,6 +869,26 @@ static void s3_trio_vga_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             break;
         default:
             vga_ioport_write(&s->vga, addr, val);
+            break;
+        }
+        break;
+    case VGA_SEQ_I:
+        s->vga.sr_index = val;
+        break;
+    case VGA_SEQ_D:
+        switch (s->vga.sr_index) {
+        case 0x00 ... 0x07:
+            vga_ioport_write(&s->vga, addr, val);
+            break;
+        case 0x08:
+            s->vga.sr[s->vga.sr_index] = val;
+            break;
+        case 0x09 ... 0x1c:
+            if ((s->vga.sr[0x08] & 0x0f) == 0x06) {
+                s->vga.sr[s->vga.sr_index] = val;
+            }
+            break;
+        default:
             break;
         }
         break;

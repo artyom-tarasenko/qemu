@@ -665,6 +665,11 @@ SunOS)
   solarisnetlibs="-lsocket -lnsl -lresolv"
   LIBS="$solarisnetlibs $LIBS"
   libs_qga="$solarisnetlibs $libs_qga"
+  if [ "$cpu" = "x86_64" ]; then
+    export PKG_CONFIG_LIBDIR=/usr/lib/x86_64/pkgconfig
+  elif [ "$cpu" = "sparc64" ]; then
+    export PKG_CONFIG_LIBDIR=/usr/lib/sparcv9/pkgconfig
+  fi
 ;;
 AIX)
   aix="yes"

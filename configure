@@ -470,6 +470,8 @@ SunOS)
   # $(uname -m) returns i86pc even on an x86_64 box, so default based on isainfo
   if test -z "$cpu" && test "$(isainfo -k)" = "amd64"; then
     cpu="x86_64"
+  elif test -z "$cpu" && test "$(isainfo -k)" = "sparcv9"; then
+    cpu="sparc64"
   fi
 esac
 

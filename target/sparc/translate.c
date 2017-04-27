@@ -54,7 +54,8 @@ static TCGv cpu_tbr;
 #endif
 static TCGv cpu_cond;
 #ifdef TARGET_SPARC64
-static TCGv_i32 cpu_xcc, cpu_fprs;
+static TCGv_i32 cpu_xcc;
+static TCGv cpu_fprs;
 static TCGv cpu_gsr;
 static TCGv cpu_tick_cmpr, cpu_stick_cmpr, cpu_hstick_cmpr;
 static TCGv cpu_hintp, cpu_htba, cpu_hver, cpu_ssr, cpu_ver;
@@ -156,7 +157,7 @@ static inline void gen_update_fprs_dirty(DisasContext *dc, int rd)
        we can avoid setting it again.  */
     if (!(dc->fprs_dirty & bit)) {
         dc->fprs_dirty |= bit;
-        tcg_gen_ori_i32(cpu_fprs, cpu_fprs, bit);
+        tcg_gen_ori_tl(cpu_fprs, cpu_fprs, bit);
     }
 #endif
 }
@@ -3406,8 +3407,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                     }
                     break;
                 case 0x6: /* V9 rdfprs */
-                    tcg_gen_ext_i32_tl(cpu_dst, cpu_fprs);
-                    gen_store_gpr(dc, rd, cpu_dst);
+                    gen_store_gpr(dc, rd, cpu_fprs);
                     break;
                 case 0xf: /* V9 membar */
                     break; /* no effect */
@@ -4320,8 +4320,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                                 dc->is_br = 1;
                                 break;
                             case 0x6: /* V9 wrfprs */
-                                tcg_gen_xor_tl(cpu_tmp0, cpu_src1, cpu_src2);
-                                tcg_gen_trunc_tl_i32(cpu_fprs, cpu_tmp0);
+                                tcg_gen_xor_tl(cpu_fprs, cpu_src1, cpu_src2);
                                 dc->fprs_dirty = 0;
                                 save_state(dc);
                                 gen_op_next_insn();
@@ -5867,7 +5866,6 @@ void gen_intermediate_code_init(CPUSPARCState *env)
     static const struct { TCGv_i32 *ptr; int off; const char *name; } r32[] = {
 #ifdef TARGET_SPARC64
         { &cpu_xcc, offsetof(CPUSPARCState, xcc), "xcc" },
-        { &cpu_fprs, offsetof(CPUSPARCState, fprs), "fprs" },
 #else
         { &cpu_wim, offsetof(CPUSPARCState, wim), "wim" },
 #endif
@@ -5877,6 +5875,7 @@ void gen_intermediate_code_init(CPUSPARCState *env)
 
     static const struct { TCGv *ptr; int off; const char *name; } rtl[] = {
 #ifdef TARGET_SPARC64
+        { &cpu_fprs, offsetof(CPUSPARCState, fprs), "fprs" },
         { &cpu_gsr, offsetof(CPUSPARCState, gsr), "gsr" },
         { &cpu_tick_cmpr, offsetof(CPUSPARCState, tick_cmpr), "tick_cmpr" },
         { &cpu_stick_cmpr, offsetof(CPUSPARCState, stick_cmpr), "stick_cmpr" },

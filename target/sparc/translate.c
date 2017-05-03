@@ -360,6 +360,8 @@ static inline bool use_goto_tb(DisasContext *s, target_ulong pc,
 #endif
 }
 
+static void gen_exception(DisasContext *dc, int which);
+
 static inline void gen_goto_tb(DisasContext *s, int tb_num,
                                target_ulong pc, target_ulong npc)
 {
@@ -371,6 +373,9 @@ static inline void gen_goto_tb(DisasContext *s, int tb_num,
         tcg_gen_exit_tb((uintptr_t)s->tb + tb_num);
     } else {
         /* jump to another page: currently not optimized */
+        if (s->singlestep) {
+            gen_exception(s, EXCP_DEBUG);
+        }
         tcg_gen_movi_tl(cpu_pc, pc);
         tcg_gen_movi_tl(cpu_npc, npc);
         tcg_gen_exit_tb(0);

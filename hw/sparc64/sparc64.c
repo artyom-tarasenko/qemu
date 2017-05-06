@@ -185,7 +185,6 @@ static void main_cpu_reset(void *opaque)
 {
     ResetData *s = (ResetData *)opaque;
     CPUSPARCState *env = &s->cpu->env;
-    static unsigned int nr_resets;
 
     cpu_reset(CPU(s->cpu));
 
@@ -196,12 +195,7 @@ static void main_cpu_reset(void *opaque)
     env->gregs[1] = 0; /* Memory start */
     env->gregs[2] = ram_size; /* Memory size */
     env->gregs[3] = 0; /* Machine description XXX */
-    if (nr_resets++ == 0) {
-        /* Power on reset */
-        env->pc = s->prom_addr + 0x20ULL;
-    } else {
-        env->pc = s->prom_addr + 0x40ULL;
-    }
+    env->pc = s->prom_addr + 0x20ULL; /* reset */
     env->npc = env->pc + 4;
 }
 

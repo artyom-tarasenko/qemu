@@ -1122,10 +1122,12 @@ static inline void gen_mov_pc_npc(DisasContext *dc)
     }
 }
 
-static inline void gen_op_next_insn(void)
+static inline void gen_op_next_insn(DisasContext *dc)
 {
     tcg_gen_mov_tl(cpu_pc, cpu_npc);
     tcg_gen_addi_tl(cpu_npc, cpu_npc, 4);
+    if (dc->singlestep)
+        gen_helper_debug(cpu_env);
 }
 
 static void free_compare(DisasCompare *cmp)
@@ -4320,7 +4322,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                                                 offsetof(CPUSPARCState, asi));
                                 /* End TB to notice changed ASI.  */
                                 save_state(dc);
-                                gen_op_next_insn();
+                                gen_op_next_insn(dc);
                                 tcg_gen_exit_tb(0);
                                 dc->is_br = 1;
                                 break;
@@ -4328,7 +4330,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                                 tcg_gen_xor_tl(cpu_fprs, cpu_src1, cpu_src2);
                                 dc->fprs_dirty = 0;
                                 save_state(dc);
-                                gen_op_next_insn();
+                                gen_op_next_insn(dc);
                                 tcg_gen_exit_tb(0);
                                 dc->is_br = 1;
                                 break;
@@ -4456,7 +4458,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                             tcg_gen_movi_i32(cpu_cc_op, CC_OP_FLAGS);
                             dc->cc_op = CC_OP_FLAGS;
                             save_state(dc);
-                            gen_op_next_insn();
+                            gen_op_next_insn(dc);
                             tcg_gen_exit_tb(0);
                             dc->is_br = 1;
 #endif
@@ -4612,7 +4614,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                                                offsetof(CPUSPARCState,
                                                         hpstate));
                                 save_state(dc);
-                                gen_op_next_insn();
+                                gen_op_next_insn(dc);
                                 tcg_gen_exit_tb(0);
                                 dc->is_br = 1;
                                 break;
@@ -5676,7 +5678,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
     /* default case for non jump instructions */
     if (dc->npc == DYNAMIC_PC) {
         dc->pc = DYNAMIC_PC;
-        gen_op_next_insn();
+        gen_op_next_insn(dc);
     } else if (dc->npc == JUMP_PC) {
         /* we can do a static jump */
         gen_branch2(dc, dc->jump_pc[0], dc->jump_pc[1], cpu_cond);

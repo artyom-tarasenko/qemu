@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # qemu configure script (c) 2003 Fabrice Bellard
 #
@@ -470,6 +470,8 @@ SunOS)
   # $(uname -m) returns i86pc even on an x86_64 box, so default based on isainfo
   if test -z "$cpu" && test "$(isainfo -k)" = "amd64"; then
     cpu="x86_64"
+  elif test -z "$cpu" && test "$(isainfo -k)" = "sparcv9"; then
+    cpu="sparc64"
   fi
 esac
 
@@ -663,6 +665,11 @@ SunOS)
   solarisnetlibs="-lsocket -lnsl -lresolv"
   LIBS="$solarisnetlibs $LIBS"
   libs_qga="$solarisnetlibs $libs_qga"
+  if [ "$cpu" = "x86_64" ]; then
+    export PKG_CONFIG_LIBDIR=/usr/lib/x86_64/pkgconfig
+  elif [ "$cpu" = "sparc64" ]; then
+    export PKG_CONFIG_LIBDIR=/usr/lib/sparcv9/pkgconfig
+  fi
 ;;
 AIX)
   aix="yes"

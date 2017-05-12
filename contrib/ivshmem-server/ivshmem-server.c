@@ -289,7 +289,7 @@ ivshmem_server_init(IvshmemServer *server, const char *unix_sock_path,
 int
 ivshmem_server_start(IvshmemServer *server)
 {
-    struct sockaddr_un sun;
+    struct sockaddr_un sa_un;
     int shm_fd, sock_fd, ret;
 
     /* open shm file */
@@ -328,15 +328,15 @@ ivshmem_server_start(IvshmemServer *server)
         goto err_close_shm;
     }
 
-    sun.sun_family = AF_UNIX;
-    ret = snprintf(sun.sun_path, sizeof(sun.sun_path), "%s",
+    sa_un.sun_family = AF_UNIX;
+    ret = snprintf(sa_un.sun_path, sizeof(sa_un.sun_path), "%s",
                    server->unix_sock_path);
-    if (ret < 0 || ret >= sizeof(sun.sun_path)) {
+    if (ret < 0 || ret >= sizeof(sa_un.sun_path)) {
         IVSHMEM_SERVER_DEBUG(server, "could not copy unix socket path\n");
         goto err_close_sock;
     }
-    if (bind(sock_fd, (struct sockaddr *)&sun, sizeof(sun)) < 0) {
-        IVSHMEM_SERVER_DEBUG(server, "cannot connect to %s: %s\n", sun.sun_path,
+    if (bind(sock_fd, (struct sockaddr *)&sa_un, sizeof(sa_un)) < 0) {
+        IVSHMEM_SERVER_DEBUG(server, "cannot connect to %s: %s\n", sa_un.sun_path,
                              strerror(errno));
         goto err_close_sock;
     }

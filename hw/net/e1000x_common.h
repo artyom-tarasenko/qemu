@@ -22,6 +22,7 @@
 * License along with this library; if not, see <http://www.gnu.org/licenses/>.
 */
 
+#undef SEC  /* conflicts with sys/time.h on SunOS */
 #include "e1000_regs.h"
 
 #define defreg(x)   x = (E1000_##x >> 2)

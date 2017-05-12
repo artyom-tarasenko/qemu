@@ -740,7 +740,9 @@ tests/migration/initrd-stress.img: tests/migration/stress$(EXESUF)
 	rmdir $(INITRD_WORK_DIR)
 
 ifeq ($(CONFIG_POSIX),y)
+ifneq ($(CONFIG_SOLARIS),y)
 LIBS += -lutil
+endif
 endif
 
 # QTest rules

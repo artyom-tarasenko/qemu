@@ -54,7 +54,8 @@ static TCGv cpu_tbr;
 #endif
 static TCGv cpu_cond;
 #ifdef TARGET_SPARC64
-static TCGv_i32 cpu_xcc, cpu_fprs;
+static TCGv_i32 cpu_xcc;
+static TCGv cpu_fprs;
 static TCGv cpu_gsr;
 static TCGv cpu_tick_cmpr, cpu_stick_cmpr, cpu_hstick_cmpr;
 static TCGv cpu_hintp, cpu_htba, cpu_hver, cpu_ssr, cpu_ver;
@@ -156,7 +157,7 @@ static inline void gen_update_fprs_dirty(DisasContext *dc, int rd)
        we can avoid setting it again.  */
     if (!(dc->fprs_dirty & bit)) {
         dc->fprs_dirty |= bit;
-        tcg_gen_ori_i32(cpu_fprs, cpu_fprs, bit);
+        tcg_gen_ori_tl(cpu_fprs, cpu_fprs, bit);
     }
 #endif
 }
@@ -359,6 +360,8 @@ static inline bool use_goto_tb(DisasContext *s, target_ulong pc,
 #endif
 }
 
+static void gen_exception(DisasContext *dc, int which);
+
 static inline void gen_goto_tb(DisasContext *s, int tb_num,
                                target_ulong pc, target_ulong npc)
 {
@@ -370,6 +373,9 @@ static inline void gen_goto_tb(DisasContext *s, int tb_num,
         tcg_gen_exit_tb((uintptr_t)s->tb + tb_num);
     } else {
         /* jump to another page: currently not optimized */
+        if (s->singlestep) {
+            gen_exception(s, EXCP_DEBUG);
+        }
         tcg_gen_movi_tl(cpu_pc, pc);
         tcg_gen_movi_tl(cpu_npc, npc);
         tcg_gen_exit_tb(0);
@@ -1116,10 +1122,12 @@ static inline void gen_mov_pc_npc(DisasContext *dc)
     }
 }
 
-static inline void gen_op_next_insn(void)
+static inline void gen_op_next_insn(DisasContext *dc)
 {
     tcg_gen_mov_tl(cpu_pc, cpu_npc);
     tcg_gen_addi_tl(cpu_npc, cpu_npc, 4);
+    if (dc->singlestep)
+        gen_helper_debug(cpu_env);
 }
 
 static void free_compare(DisasCompare *cmp)
@@ -3429,8 +3437,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                     }
                     break;
                 case 0x6: /* V9 rdfprs */
-                    tcg_gen_ext_i32_tl(cpu_dst, cpu_fprs);
-                    gen_store_gpr(dc, rd, cpu_dst);
+                    gen_store_gpr(dc, rd, cpu_fprs);
                     break;
                 case 0xf: /* V9 membar */
                     break; /* no effect */
@@ -4338,16 +4345,15 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                                                 offsetof(CPUSPARCState, asi));
                                 /* End TB to notice changed ASI.  */
                                 save_state(dc);
-                                gen_op_next_insn();
+                                gen_op_next_insn(dc);
                                 tcg_gen_exit_tb(0);
                                 dc->is_br = 1;
                                 break;
                             case 0x6: /* V9 wrfprs */
-                                tcg_gen_xor_tl(cpu_tmp0, cpu_src1, cpu_src2);
-                                tcg_gen_trunc_tl_i32(cpu_fprs, cpu_tmp0);
+                                tcg_gen_xor_tl(cpu_fprs, cpu_src1, cpu_src2);
                                 dc->fprs_dirty = 0;
                                 save_state(dc);
-                                gen_op_next_insn();
+                                gen_op_next_insn(dc);
                                 tcg_gen_exit_tb(0);
                                 dc->is_br = 1;
                                 break;
@@ -4475,7 +4481,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                             tcg_gen_movi_i32(cpu_cc_op, CC_OP_FLAGS);
                             dc->cc_op = CC_OP_FLAGS;
                             save_state(dc);
-                            gen_op_next_insn();
+                            gen_op_next_insn(dc);
                             tcg_gen_exit_tb(0);
                             dc->is_br = 1;
 #endif
@@ -4631,7 +4637,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                                                offsetof(CPUSPARCState,
                                                         hpstate));
                                 save_state(dc);
-                                gen_op_next_insn();
+                                gen_op_next_insn(dc);
                                 tcg_gen_exit_tb(0);
                                 dc->is_br = 1;
                                 break;
@@ -5695,7 +5701,7 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
     /* default case for non jump instructions */
     if (dc->npc == DYNAMIC_PC) {
         dc->pc = DYNAMIC_PC;
-        gen_op_next_insn();
+        gen_op_next_insn(dc);
     } else if (dc->npc == JUMP_PC) {
         /* we can do a static jump */
         gen_branch2(dc, dc->jump_pc[0], dc->jump_pc[1], cpu_cond);
@@ -5890,7 +5896,6 @@ void gen_intermediate_code_init(CPUSPARCState *env)
     static const struct { TCGv_i32 *ptr; int off; const char *name; } r32[] = {
 #ifdef TARGET_SPARC64
         { &cpu_xcc, offsetof(CPUSPARCState, xcc), "xcc" },
-        { &cpu_fprs, offsetof(CPUSPARCState, fprs), "fprs" },
 #else
         { &cpu_wim, offsetof(CPUSPARCState, wim), "wim" },
 #endif
@@ -5900,6 +5905,7 @@ void gen_intermediate_code_init(CPUSPARCState *env)
 
     static const struct { TCGv *ptr; int off; const char *name; } rtl[] = {
 #ifdef TARGET_SPARC64
+        { &cpu_fprs, offsetof(CPUSPARCState, fprs), "fprs" },
         { &cpu_gsr, offsetof(CPUSPARCState, gsr), "gsr" },
         { &cpu_tick_cmpr, offsetof(CPUSPARCState, tick_cmpr), "tick_cmpr" },
         { &cpu_stick_cmpr, offsetof(CPUSPARCState, stick_cmpr), "stick_cmpr" },

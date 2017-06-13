@@ -792,7 +792,7 @@ static int gdb_handle_packet(GDBState *s, const char *line_buf)
     const char *p;
     uint32_t thread;
     int ch, reg_size, type, res;
-    char buf[MAX_PACKET_LENGTH];
+    char buf[MAX_PACKET_LENGTH + 1]; /* include space for trailing NUL */
     uint8_t mem_buf[MAX_PACKET_LENGTH];
     uint8_t *registers;
     target_ulong addr, len;

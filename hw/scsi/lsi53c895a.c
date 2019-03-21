@@ -2210,11 +2210,13 @@ static const struct SCSIBusInfo lsi_scsi_info = {
     .cancel = lsi_request_cancelled
 };
 
-static void lsi_scsi_realize(PCIDevice *dev, Error **errp)
+static void lsi_scsi_realize_8xx(PCIDevice *dev, Error **errp, uint16_t type)
 {
     LSIState *s = LSI53C895A(dev);
     DeviceState *d = DEVICE(dev);
     uint8_t *pci_conf;
+    uint64_t mmio_size;
+    MemoryRegion *mr;
 
     pci_conf = dev->config;
 
@@ -2223,13 +2225,21 @@ static void lsi_scsi_realize(PCIDevice *dev, Error **errp)
     /* Interrupt pin A */
     pci_conf[PCI_INTERRUPT_PIN] = 0x01;
 
-    memory_region_init_io(&s->mmio_io, OBJECT(s), &lsi_mmio_ops, s,
-                          "lsi-mmio", 0x400);
     memory_region_init_io(&s->ram_io, OBJECT(s), &lsi_ram_ops, s,
                           "lsi-ram", 0x2000);
     memory_region_init_io(&s->io_io, OBJECT(s), &lsi_io_ops, s,
                           "lsi-io", 256);
-
+    if (type == PCI_DEVICE_ID_LSI_53C895A) {
+        mmio_size = 0x400;
+    } else {
+        mr = g_new(MemoryRegion, 1);
+        memory_region_init_alias(mr, OBJECT(d), "lsi-io-alias", &s->io_io,
+                                 0, 0x80);
+        memory_region_add_subregion_overlap(&s->io_io, 0x80, mr, -1);
+        mmio_size = 0x80;
+    }
+    memory_region_init_io(&s->mmio_io, OBJECT(s), &lsi_mmio_ops, s,
+                          "lsi-mmio", mmio_size);
     address_space_init(&s->pci_io_as, pci_address_space_io(dev), "lsi-pci-io");
     qdev_init_gpio_out(d, &s->ext_irq, 1);
 
@@ -2239,6 +2249,16 @@ static void lsi_scsi_realize(PCIDevice *dev, Error **errp)
     QTAILQ_INIT(&s->queue);
 
     scsi_bus_new(&s->bus, sizeof(s->bus), d, &lsi_scsi_info, NULL);
+}
+
+static void lsi_scsi_realize_895A(PCIDevice *dev, Error **errp)
+{
+    lsi_scsi_realize_8xx(dev, errp, PCI_DEVICE_ID_LSI_53C895A);
+}
+
+static void lsi_scsi_realize_810(PCIDevice *dev, Error **errp)
+{
+    lsi_scsi_realize_8xx(dev, errp, PCI_DEVICE_ID_LSI_53C810);
 }
 
 static void lsi_scsi_unrealize(DeviceState *dev, Error **errp)
@@ -2253,7 +2273,7 @@ static void lsi_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
-    k->realize = lsi_scsi_realize;
+    k->realize = lsi_scsi_realize_895A;
     k->vendor_id = PCI_VENDOR_ID_LSI_LOGIC;
     k->device_id = PCI_DEVICE_ID_LSI_53C895A;
     k->class_id = PCI_CLASS_STORAGE_SCSI;
@@ -2279,6 +2299,7 @@ static void lsi53c810_class_init(ObjectClass *klass, void *data)
 {
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
+    k->realize = lsi_scsi_realize_810;
     k->device_id = PCI_DEVICE_ID_LSI_53C810;
 }
 

@@ -62,6 +62,7 @@ typedef struct PRePPCIState {
     AddressSpace pci_io_as;
     MemoryRegion pci_io;
     MemoryRegion pci_io_non_contiguous;
+    MemoryRegion pci_io_system;
     MemoryRegion pci_memory;
     MemoryRegion pci_intack;
     MemoryRegion bm;
@@ -146,7 +147,7 @@ static uint64_t raven_io_read(void *opaque, hwaddr addr,
     uint8_t buf[4];
 
     addr = raven_io_address(s, addr);
-    address_space_read(&s->pci_io_as, addr + 0x80000000,
+    address_space_read(&s->pci_io_as, addr,
                        MEMTXATTRS_UNSPECIFIED, buf, size);
 
     if (size == 1) {
@@ -178,7 +179,7 @@ static void raven_io_write(void *opaque, hwaddr addr,
         g_assert_not_reached();
     }
 
-    address_space_write(&s->pci_io_as, addr + 0x80000000,
+    address_space_write(&s->pci_io_as, addr,
                         MEMTXATTRS_UNSPECIFIED, buf, size);
 }
 
@@ -276,14 +277,20 @@ static void raven_pcihost_initfn(Object *obj)
     MemoryRegion *address_space_mem = get_system_memory();
     DeviceState *pci_dev;
 
-    memory_region_init(&s->pci_io, obj, "pci-io", 0x3f800000);
+    memory_region_init(&s->pci_io, obj, "pci-io", UINT32_MAX);
     memory_region_init_io(&s->pci_io_non_contiguous, obj, &raven_io_ops, s,
                           "pci-io-non-contiguous", 0x00800000);
     memory_region_init(&s->pci_memory, obj, "pci-memory", 0x3f000000);
     address_space_init(&s->pci_io_as, &s->pci_io, "raven-io");
 
     /* CPU address space */
-    memory_region_add_subregion(address_space_mem, 0x80000000, &s->pci_io);
+    memory_region_add_subregion_overlap(address_space_mem, 0x0,
+                                        &s->pci_io, -1);
+
+    memory_region_init_alias(&s->pci_io_system,  obj, "pci-io-system",
+                             &s->pci_io, 0x0000000, 0x3f800000);
+
+    memory_region_add_subregion(address_space_mem, 0x80000000, &s->pci_io_system);
     memory_region_add_subregion_overlap(address_space_mem, 0x80000000,
                                         &s->pci_io_non_contiguous, 1);
     memory_region_add_subregion(address_space_mem, 0xc0000000, &s->pci_memory);

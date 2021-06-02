@@ -87,6 +87,8 @@
 #define NVME_TEMPERATURE_WARNING 0x157
 #define NVME_TEMPERATURE_CRITICAL 0x175
 #define NVME_NUM_FW_SLOTS 1
+#define VHOST_NVME_BAR_READ 0
+#define VHOST_NVME_BAR_WRITE 1
 
 #ifdef _VHOST_DEBUG
 #define VHOST_OPS_DEBUG(fmt, ...) \
@@ -246,6 +248,39 @@ static void vhost_nvme_vector_mask(PCIDevice *dev, unsigned vector)
     return;
 }
 
+static int vhost_dev_set_features(struct vhost_dev *dev,
+                                  bool enable_log)
+{
+    uint64_t features = dev->acked_features;
+    int r;
+    if (enable_log) {
+        features |= 0x1ULL << VHOST_F_LOG_ALL;
+    }
+    if (!vhost_dev_has_iommu(dev)) {
+        features &= ~(0x1ULL << VIRTIO_F_IOMMU_PLATFORM);
+    }
+    if (dev->vhost_ops->vhost_force_iommu) {
+        if (dev->vhost_ops->vhost_force_iommu(dev) == true) {
+            features |= 0x1ULL << VIRTIO_F_IOMMU_PLATFORM;
+       }
+    }
+    r = dev->vhost_ops->vhost_set_features(dev, features);
+    if (r < 0) {
+        VHOST_OPS_DEBUG("vhost_set_features failed");
+        goto out;
+    }
+    if (dev->vhost_ops->vhost_set_backend_cap) {
+        r = dev->vhost_ops->vhost_set_backend_cap(dev);
+        if (r < 0) {
+            VHOST_OPS_DEBUG("vhost_set_backend_cap failed");
+            goto out;
+        }
+    }
+
+out:
+    return r < 0 ? -errno : 0;
+}
+
 static int vhost_dev_nvme_start(struct vhost_dev *hdev, VirtIODevice *vdev)
 {
     int ret;
@@ -291,6 +326,62 @@ static int vhost_dev_nvme_stop(struct vhost_dev *hdev)
 
     hdev->started = false;
     hdev->vdev = NULL;
+    return 0;
+}
+
+static int vhost_nvme_set_endpoint(NvmeCtrl *n)
+{
+    const VhostOps *vhost_ops = n->dev.vhost_ops;
+    struct vhost_nvme_target backend;
+    int ret;
+
+    info_report("QEMU Start NVMe Controller ...");
+    if (vhost_dev_nvme_start(&n->dev, NULL) < 0) {
+        error_report("vhost_nvme_set_endpoint: vhost device start failed");
+        return -1;
+    }
+
+    //NVME not have wwpn, but have serial number. See nvme_props for more info
+    memset(&backend, 0, sizeof(backend));
+    pstrcpy(backend.vhost_wwpn, sizeof(backend.vhost_wwpn), n->params.serial);
+    ret = vhost_ops->vhost_nvme_set_endpoint(&n->dev, &backend);
+    if (ret < 0) {
+        return -errno;
+    }
+
+    return 0;
+}
+
+static int vhost_nvme_clear_endpoint(NvmeCtrl *n, bool shutdown)
+{
+    const VhostOps *vhost_ops = n->dev.vhost_ops;
+    struct vhost_nvme_target backend;
+    int ret;
+
+    if (shutdown) {
+        info_report("QEMU Shutdown NVMe Controller ...");
+    } else {
+        info_report("QEMU Disable NVMe Controller ...");
+    }
+
+    if (vhost_dev_nvme_stop(&n->dev) < 0) {
+        error_report("vhost_nvme_clear_endpoint: vhost device stop failed");
+        return -1;
+    }
+
+    if (shutdown) {
+        nvme_clear_guest_notifier(n);
+    }
+
+    memset(&backend, 0, sizeof(backend));
+    pstrcpy(backend.vhost_wwpn, sizeof(backend.vhost_wwpn), n->params.serial);
+    ret = vhost_ops->vhost_nvme_clear_endpoint(&n->dev, &backend);
+    if (ret < 0) {
+        return -errno;
+    }
+
+    n->bar.cc = 0;
+    n->dataplane_started = false;
     return 0;
 }
 
@@ -352,6 +443,26 @@ static void vhost_nvme_vector_poll(PCIDevice *dev,
             }
         }
     }
+}
+
+static int nvme_set_eventfd(NvmeCtrl *n, EventNotifier *notifier, uint16_t cqid, uint32_t *vector, uint16_t *irq_enabled)
+{
+    const VhostOps *vhost_ops = n->dev.vhost_ops;
+    int fd = event_notifier_get_fd(notifier);
+    struct nvmet_vhost_eventfd eventfd;
+    int ret;
+
+    memset(&eventfd, 0, sizeof(eventfd));
+    eventfd.num = cqid;
+    eventfd.fd = fd;
+    eventfd.irq_enabled = (int*)irq_enabled;
+    eventfd.vector = (int*)vector;
+    ret = vhost_ops->vhost_nvme_set_eventfd(&n->dev, &eventfd);
+    if (ret < 0) {
+        error_report("vhost_nvme_set_eventfd error = %d", ret);
+    }
+
+    return 0;
 }
 
 static inline void *nvme_addr_to_cmb(NvmeCtrl *n, hwaddr addr)
@@ -1673,7 +1784,7 @@ static uint16_t nvme_create_cq(NvmeCtrl *n, NvmeRequest *req)
             return -1;
         }
     }
-
+    nvme_set_eventfd(n, &cq->guest_notifier, cq->cqid, &cq->vector, &cq->irq_enabled);
 
     /*
      * It is only required to set qs_created when creating a completion queue;
@@ -2264,7 +2375,7 @@ static void nvme_clear_ctrl(NvmeCtrl *n)
     n->bar.cc = 0;
 }
 
-static int nvme_start_ctrl(NvmeCtrl *n)
+/* static int nvme_start_ctrl(NvmeCtrl *n)  //kernel side?!
 {
     uint32_t page_bits = NVME_CC_MPS(n->bar.cc) + 12;
     uint32_t page_size = 1 << page_bits;
@@ -2363,198 +2474,46 @@ static int nvme_start_ctrl(NvmeCtrl *n)
     QTAILQ_INIT(&n->aer_queue);
 
     return 0;
-}
+} */
 
 static void nvme_write_bar(NvmeCtrl *n, hwaddr offset, uint64_t data,
                            unsigned size)
 {
-    if (unlikely(offset & (sizeof(uint32_t) - 1))) {
-        NVME_GUEST_ERR(pci_nvme_ub_mmiowr_misaligned32,
-                       "MMIO write not 32-bit aligned,"
-                       " offset=0x%"PRIx64"", offset);
-        /* should be ignored, fall through for now */
-    }
+    const VhostOps *vhost_ops = n->dev.vhost_ops;
+    struct nvmet_vhost_bar nvmet_bar;
+    int ret;
 
-    if (unlikely(size < sizeof(uint32_t))) {
-        NVME_GUEST_ERR(pci_nvme_ub_mmiowr_toosmall,
-                       "MMIO write smaller than 32-bits,"
-                       " offset=0x%"PRIx64", size=%u",
-                       offset, size);
-        /* should be ignored, fall through for now */
-    }
-
-    switch (offset) {
-    case 0xc:   /* INTMS */
-        if (unlikely(msix_enabled(&(n->parent_obj)))) {
-            NVME_GUEST_ERR(pci_nvme_ub_mmiowr_intmask_with_msix,
-                           "undefined access to interrupt mask set"
-                           " when MSI-X is enabled");
-            /* should be ignored, fall through for now */
-        }
-        n->bar.intms |= data & 0xffffffff;
-        n->bar.intmc = n->bar.intms;
-        trace_pci_nvme_mmio_intm_set(data & 0xffffffff, n->bar.intmc);
-        nvme_irq_check(n);
-        break;
-    case 0x10:  /* INTMC */
-        if (unlikely(msix_enabled(&(n->parent_obj)))) {
-            NVME_GUEST_ERR(pci_nvme_ub_mmiowr_intmask_with_msix,
-                           "undefined access to interrupt mask clr"
-                           " when MSI-X is enabled");
-            /* should be ignored, fall through for now */
-        }
-        n->bar.intms &= ~(data & 0xffffffff);
-        n->bar.intmc = n->bar.intms;
-        trace_pci_nvme_mmio_intm_clr(data & 0xffffffff, n->bar.intmc);
-        nvme_irq_check(n);
-        break;
-    case 0x14:  /* CC */
-        trace_pci_nvme_mmio_cfg(data & 0xffffffff);
-        /* Windows first sends data, then sends enable bit */
-        if (!NVME_CC_EN(data) && !NVME_CC_EN(n->bar.cc) &&
-            !NVME_CC_SHN(data) && !NVME_CC_SHN(n->bar.cc))
-        {
-            n->bar.cc = data;
-        }
-
-        if (NVME_CC_EN(data) && !NVME_CC_EN(n->bar.cc)) {
-            n->bar.cc = data;
-            if (unlikely(nvme_start_ctrl(n))) {
-                trace_pci_nvme_err_startfail();
-                n->bar.csts = NVME_CSTS_FAILED;
-            } else {
-                trace_pci_nvme_mmio_start_success();
-                n->bar.csts = NVME_CSTS_READY;
-            }
-        } else if (!NVME_CC_EN(data) && NVME_CC_EN(n->bar.cc)) {
-            trace_pci_nvme_mmio_stopped();
-            nvme_clear_ctrl(n);
-            n->bar.csts &= ~NVME_CSTS_READY;
-        }
-        if (NVME_CC_SHN(data) && !(NVME_CC_SHN(n->bar.cc))) {
-            trace_pci_nvme_mmio_shutdown_set();
-            nvme_clear_ctrl(n);
-            n->bar.cc = data;
-            n->bar.csts |= NVME_CSTS_SHST_COMPLETE;
-        } else if (!NVME_CC_SHN(data) && NVME_CC_SHN(n->bar.cc)) {
-            trace_pci_nvme_mmio_shutdown_cleared();
-            n->bar.csts &= ~NVME_CSTS_SHST_COMPLETE;
-            n->bar.cc = data;
-        }
-        break;
-    case 0x1C:  /* CSTS */
-        if (data & (1 << 4)) {
-            NVME_GUEST_ERR(pci_nvme_ub_mmiowr_ssreset_w1c_unsupported,
-                           "attempted to W1C CSTS.NSSRO"
-                           " but CAP.NSSRS is zero (not supported)");
-        } else if (data != 0) {
-            NVME_GUEST_ERR(pci_nvme_ub_mmiowr_ro_csts,
-                           "attempted to set a read only bit"
-                           " of controller status");
-        }
-        break;
-    case 0x20:  /* NSSR */
-        if (data == 0x4E564D65) {
-            trace_pci_nvme_ub_mmiowr_ssreset_unsupported();
-        } else {
-            /* The spec says that writes of other values have no effect */
-            return;
-        }
-        break;
-    case 0x24:  /* AQA */
-        n->bar.aqa = data & 0xffffffff;
-        trace_pci_nvme_mmio_aqattr(data & 0xffffffff);
-        break;
-    case 0x28:  /* ASQ */
-        n->bar.asq = data;
-        trace_pci_nvme_mmio_asqaddr(data);
-        break;
-    case 0x2c:  /* ASQ hi */
-        n->bar.asq |= data << 32;
-        trace_pci_nvme_mmio_asqaddr_hi(data, n->bar.asq);
-        break;
-    case 0x30:  /* ACQ */
-        trace_pci_nvme_mmio_acqaddr(data);
-        n->bar.acq = data;
-        break;
-    case 0x34:  /* ACQ hi */
-        n->bar.acq |= data << 32;
-        trace_pci_nvme_mmio_acqaddr_hi(data, n->bar.acq);
-        break;
-    case 0x38:  /* CMBLOC */
-        NVME_GUEST_ERR(pci_nvme_ub_mmiowr_cmbloc_reserved,
-                       "invalid write to reserved CMBLOC"
-                       " when CMBSZ is zero, ignored");
-        return;
-    case 0x3C:  /* CMBSZ */
-        NVME_GUEST_ERR(pci_nvme_ub_mmiowr_cmbsz_readonly,
-                       "invalid write to read only CMBSZ, ignored");
-        return;
-    case 0xE00: /* PMRCAP */
-        NVME_GUEST_ERR(pci_nvme_ub_mmiowr_pmrcap_readonly,
-                       "invalid write to PMRCAP register, ignored");
-        return;
-    case 0xE04: /* TODO PMRCTL */
-        break;
-    case 0xE08: /* PMRSTS */
-        NVME_GUEST_ERR(pci_nvme_ub_mmiowr_pmrsts_readonly,
-                       "invalid write to PMRSTS register, ignored");
-        return;
-    case 0xE0C: /* PMREBS */
-        NVME_GUEST_ERR(pci_nvme_ub_mmiowr_pmrebs_readonly,
-                       "invalid write to PMREBS register, ignored");
-        return;
-    case 0xE10: /* PMRSWTP */
-        NVME_GUEST_ERR(pci_nvme_ub_mmiowr_pmrswtp_readonly,
-                       "invalid write to PMRSWTP register, ignored");
-        return;
-    case 0xE14: /* TODO PMRMSC */
-        break;
-    default:
-        NVME_GUEST_ERR(pci_nvme_ub_mmiowr_invalid,
-                       "invalid MMIO write,"
-                       " offset=0x%"PRIx64", data=%"PRIx64"",
-                       offset, data);
-        break;
+    memset(&nvmet_bar, 0, sizeof(nvmet_bar));
+    nvmet_bar.type = VHOST_NVME_BAR_WRITE;
+    nvmet_bar.offset = offset;
+    nvmet_bar.size = size;
+    nvmet_bar.val = data;
+    ret = vhost_ops->vhost_nvme_bar(&n->dev, &nvmet_bar);
+    if (ret < 0) {
+        error_report("nvme_write_bar error = %d", ret);
     }
 }
 
 static uint64_t nvme_mmio_read(void *opaque, hwaddr addr, unsigned size)
 {
     NvmeCtrl *n = (NvmeCtrl *)opaque;
-    uint8_t *ptr = (uint8_t *)&n->bar;
     uint64_t val = 0;
-
-    trace_pci_nvme_mmio_read(addr);
+    const VhostOps *vhost_ops = n->dev.vhost_ops;
+    struct nvmet_vhost_bar nvmet_bar;
 
     if (unlikely(addr & (sizeof(uint32_t) - 1))) {
-        NVME_GUEST_ERR(pci_nvme_ub_mmiord_misaligned32,
-                       "MMIO read not 32-bit aligned,"
-                       " offset=0x%"PRIx64"", addr);
-        /* should RAZ, fall through for now */
+        error_report("MMIO read not 32-bit aligned, offset=0x%"PRIx64"", addr);
+        // should RAZ, fall through for now
     } else if (unlikely(size < sizeof(uint32_t))) {
-        NVME_GUEST_ERR(pci_nvme_ub_mmiord_toosmall,
-                       "MMIO read smaller than 32-bits,"
-                       " offset=0x%"PRIx64"", addr);
-        /* should RAZ, fall through for now */
+        error_report("MMIO read smaller than 32-bits,"
+                     " offset=0x%"PRIx64"", addr);
+        // should RAZ, fall through for now
     }
-
-    if (addr < sizeof(n->bar)) {
-        /*
-         * When PMRWBM bit 1 is set then read from
-         * from PMRSTS should ensure prior writes
-         * made it to persistent media
-         */
-        if (addr == 0xE08 &&
-            (NVME_PMRCAP_PMRWBM(n->bar.pmrcap) & 0x02)) {
-            memory_region_msync(&n->pmrdev->mr, 0, n->pmrdev->size);
-        }
-        memcpy(&val, ptr + addr, size);
-    } else {
-        NVME_GUEST_ERR(pci_nvme_ub_mmiord_invalid_ofs,
-                       "MMIO read beyond last register,"
-                       " offset=0x%"PRIx64", returning 0", addr);
-    }
+    memset(&nvmet_bar, 0, sizeof(nvmet_bar));
+    nvmet_bar.type = VHOST_NVME_BAR_READ;
+    nvmet_bar.offset = addr;
+    nvmet_bar.size = size;
+    val = vhost_ops->vhost_nvme_bar(&n->dev, &nvmet_bar);
 
     return val;
 }
@@ -2691,9 +2650,8 @@ static void nvme_mmio_write(void *opaque, hwaddr addr, uint64_t data,
 
     trace_pci_nvme_mmio_write(addr, data);
 
-    if (addr < sizeof(n->bar)) {
-        nvme_write_bar(n, addr, data, size);
-    } else {
+    nvme_write_bar(n, addr, data, size);
+    if (addr > sizeof(n->bar)) {
         nvme_process_db(n, addr, data);
     }
 }
@@ -2794,42 +2752,6 @@ static void nvme_init_state(NvmeCtrl *n)
     n->features.temp_thresh_hi = NVME_TEMPERATURE_WARNING;
     n->starttime_ms = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
     n->aer_reqs = g_new0(NvmeRequest *, n->params.aerl + 1);
-}
-
-int nvme_register_namespace(NvmeCtrl *n, NvmeNamespace *ns, Error **errp)
-{
-    uint32_t nsid = nvme_nsid(ns);
-
-    if (nsid > NVME_MAX_NAMESPACES) {
-        error_setg(errp, "invalid namespace id (must be between 0 and %d)",
-                   NVME_MAX_NAMESPACES);
-        return -1;
-    }
-
-    if (!nsid) {
-        for (int i = 1; i <= n->num_namespaces; i++) {
-            if (!nvme_ns(n, i)) {
-                nsid = ns->params.nsid = i;
-                break;
-            }
-        }
-
-        if (!nsid) {
-            error_setg(errp, "no free namespace id");
-            return -1;
-        }
-    } else {
-        if (n->namespaces[nsid - 1]) {
-            error_setg(errp, "namespace id '%d' is already in use", nsid);
-            return -1;
-        }
-    }
-
-    trace_pci_nvme_register_namespace(nsid);
-
-    n->namespaces[nsid - 1] = ns;
-
-    return 0;
 }
 
 static void nvme_init_cmb(NvmeCtrl *n, PCIDevice *pci_dev)
@@ -3050,6 +2972,12 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
 
     nvme_init_ctrl(n, pci_dev);
 
+    ret = vhost_nvme_set_endpoint(n);
+    if (ret < 0) {
+        error_setg(errp, "vhost-kernel-nvme: set endpoint ioctl failed");
+        return;
+    }
+
     /* setup a namespace if the controller drive property was given */
     if (n->namespace.blkconf.blk) {
         ns = &n->namespace;
@@ -3065,6 +2993,7 @@ static void nvme_exit(PCIDevice *pci_dev)
 {
     NvmeCtrl *n = NVME_VHOST(pci_dev);
 
+    vhost_nvme_clear_endpoint(n, 1);
     nvme_clear_ctrl(n);
     g_free(n->cq);
     g_free(n->sq);

@@ -1822,3 +1822,114 @@ int vhost_net_set_backend(struct vhost_dev *hdev,
 
     return -1;
 }
+
+int vhost_dev_nvme_init(struct vhost_dev *hdev, void *opaque,
+                   VhostBackendType backend_type, uint32_t busyloop_timeout)
+{
+    int r;
+    Error *local_err = NULL;
+
+    hdev->vdev = NULL;
+    hdev->migration_blocker = NULL;
+
+    r = vhost_set_backend_type(hdev, backend_type);
+    assert(r >= 0);
+
+    r = hdev->vhost_ops->vhost_backend_init(hdev, opaque);
+    if (r < 0) {
+        goto fail;
+    }
+
+    hdev->memory_listener = (MemoryListener) {
+        .begin = vhost_begin,
+        .commit = vhost_commit,
+        .region_add = vhost_region_addnop,
+        .region_nop = vhost_region_addnop,
+        .log_start = vhost_log_start,
+        .log_stop = vhost_log_stop,
+        .log_sync = vhost_log_sync,
+        .log_global_start = vhost_log_global_start,
+        .log_global_stop = vhost_log_global_stop,
+        .eventfd_add = vhost_eventfd_add,
+        .eventfd_del = vhost_eventfd_del,
+        .priority = 10
+    };
+
+    hdev->iommu_listener = (MemoryListener) {
+        .region_add = vhost_iommu_region_add,
+        .region_del = vhost_iommu_region_del,
+    };
+
+    if (hdev->migration_blocker == NULL) {
+        if (!(hdev->features & (0x1ULL << VHOST_F_LOG_ALL))) {
+            error_setg(&hdev->migration_blocker,
+                       "Migration disabled: vhost lacks VHOST_F_LOG_ALL feature.");
+        } else if (vhost_dev_log_is_shared(hdev) && !qemu_memfd_alloc_check()) {
+            error_setg(&hdev->migration_blocker,
+                       "Migration disabled: failed to allocate shared memory");
+        }
+    }
+
+    if (hdev->migration_blocker != NULL) {
+        r = migrate_add_blocker(hdev->migration_blocker, &local_err);
+        if (local_err) {
+            error_report_err(local_err);
+            error_free(hdev->migration_blocker);
+            goto fail;
+        }
+    }
+
+    hdev->mem = g_malloc0(offsetof(struct vhost_memory, regions));
+    hdev->n_mem_sections = 0;
+    hdev->mem_sections = NULL;
+    hdev->log = NULL;
+    hdev->log_size = 0;
+    hdev->log_enabled = false;
+    hdev->started = false;
+    memory_listener_register(&hdev->memory_listener, &address_space_memory);
+    QLIST_INSERT_HEAD(&vhost_devices, hdev, entry);
+
+    if (used_memslots > hdev->vhost_ops->vhost_backend_memslots_limit(hdev)) {
+        error_report("vhost backend memory slots limit is less"
+                " than current number of present memory slots");
+        r = -1;
+        goto fail;
+    }
+
+    return 0;
+
+fail:
+    vhost_dev_nvme_cleanup(hdev);
+    return r;
+}
+
+void vhost_dev_nvme_cleanup(struct vhost_dev *hdev)
+{
+    if (hdev->mem) {
+        /* those are only safe after successful init */
+        memory_listener_unregister(&hdev->memory_listener);
+        QLIST_REMOVE(hdev, entry);
+    }
+    if (hdev->migration_blocker) {
+        migrate_del_blocker(hdev->migration_blocker);
+        error_free(hdev->migration_blocker);
+    }
+    g_free(hdev->mem);
+    g_free(hdev->mem_sections);
+    if (hdev->vhost_ops) {
+        hdev->vhost_ops->vhost_backend_cleanup(hdev);
+    }
+    assert(!hdev->log);
+
+    memset(hdev, 0, sizeof(struct vhost_dev));
+}
+
+int vhost_dev_nvme_set_guest_notifier(struct vhost_dev *hdev,
+                                      EventNotifier *notifier, uint32_t qid)
+{
+    struct vhost_vring_file file;
+
+    file.fd = event_notifier_get_fd(notifier);
+    file.index = qid;
+    return hdev->vhost_ops->vhost_set_vring_call(hdev, &file);
+}

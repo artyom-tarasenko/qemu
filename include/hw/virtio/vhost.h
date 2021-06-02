@@ -146,4 +146,10 @@ int vhost_dev_set_inflight(struct vhost_dev *dev,
                            struct vhost_inflight *inflight);
 int vhost_dev_get_inflight(struct vhost_dev *dev, uint16_t queue_size,
                            struct vhost_inflight *inflight);
+
+int vhost_dev_nvme_set_guest_notifier(struct vhost_dev *hdev,
+                                       EventNotifier *notifier, uint32_t qid);
+int vhost_dev_nvme_init(struct vhost_dev *hdev, void *opaque,
+                    VhostBackendType backend_type, uint32_t busyloop_timeout);
+void vhost_dev_nvme_cleanup(struct vhost_dev *hdev);
 #endif

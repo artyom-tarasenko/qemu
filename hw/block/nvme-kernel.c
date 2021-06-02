@@ -88,6 +88,15 @@
 #define NVME_TEMPERATURE_CRITICAL 0x175
 #define NVME_NUM_FW_SLOTS 1
 
+#ifdef _VHOST_DEBUG
+#define VHOST_OPS_DEBUG(fmt, ...) \
+    do { error_report(fmt ": %s (%d)", ## __VA_ARGS__, \
+                      strerror(errno), errno); } while (0)
+#else
+#define VHOST_OPS_DEBUG(fmt, ...) \
+    do { } while (0)
+#endif
+
 #define NVME_GUEST_ERR(trace, fmt, ...) \
     do { \
         (trace_##trace)(__VA_ARGS__); \
@@ -139,6 +148,210 @@ static bool nvme_addr_is_cmb(NvmeCtrl *n, hwaddr addr)
     hwaddr hi  = n->ctrl_mem.addr + int128_get64(n->ctrl_mem.size);
 
     return addr >= low && addr < hi;
+}
+
+static int vhost_dev_has_iommu(struct vhost_dev *dev)
+{
+    VirtIODevice *vdev = dev->vdev;
+
+    /*
+     * For vhost, VIRTIO_F_IOMMU_PLATFORM means the backend support
+     * incremental memory mapping API via IOTLB API. For platform that
+     * does not have IOMMU, there's no need to enable this feature
+     * which may cause unnecessary IOTLB miss/update trnasactions.
+     */
+    return vdev->dma_as != &address_space_memory &&
+           virtio_host_has_feature(vdev, VIRTIO_F_IOMMU_PLATFORM);
+}
+
+static int vhost_kernel_nvme_add_kvm_msi_virq(NvmeCtrl *n, NvmeCQueue *cq)
+{
+    int virq;
+    int vector_n;
+
+    if (!msix_enabled(&(n->parent_obj))) {
+        error_report("MSIX is mandatory for the device");
+        return -1;
+    }
+
+    if (event_notifier_init(&cq->guest_notifier, 0)) {
+        error_report("Initiated guest notifier failed");
+        return -1;
+    }
+    event_notifier_set_handler(&cq->guest_notifier, NULL);
+
+    vector_n = cq->vector;
+
+    virq = kvm_irqchip_add_msi_route(kvm_state, vector_n, &n->parent_obj);
+    if (virq < 0) {
+        error_report("Route MSIX vector to KVM failed");
+        event_notifier_cleanup(&cq->guest_notifier);
+        return -1;
+    }
+    cq->virq = virq;
+
+    return 0;
+}
+
+static void vhost_kernel_nvme_remove_kvm_msi_virq(NvmeCQueue *cq)
+{
+    kvm_irqchip_release_virq(kvm_state, cq->virq);
+    event_notifier_cleanup(&cq->guest_notifier);
+    cq->virq = -1;
+}
+
+static void nvme_clear_guest_notifier(NvmeCtrl *n)
+{
+    NvmeCQueue *cq;
+    uint32_t qid;
+
+    for (qid = 1; qid <= n->num_io_queues; qid++) {
+        cq = n->cq[qid];
+        if (!cq) {
+            break;
+        }
+
+        if (cq->irq_enabled) {
+            vhost_kernel_nvme_remove_kvm_msi_virq(cq);
+        }
+    }
+
+    if (n->vector_poll_started) {
+        msix_unset_vector_notifiers(&n->parent_obj);
+        n->vector_poll_started = false;
+    }
+}
+
+static void vhost_nvme_vector_mask(PCIDevice *dev, unsigned vector)
+{
+    NvmeCtrl *n = container_of(dev, NvmeCtrl, parent_obj);
+    NvmeCQueue *cq;
+    EventNotifier *e;
+    uint32_t qid;
+    int ret;
+    for (qid = 1; qid <= n->num_io_queues; qid++) {
+        cq = n->cq[qid];
+        if (!cq) {
+            continue;
+        }
+        if (cq->vector == vector) {
+            e = &cq->guest_notifier;
+            ret = kvm_irqchip_remove_irqfd_notifier_gsi(kvm_state, e, cq->virq);
+            if (ret != 0) {
+                error_report("remove_irqfd_notifier_gsi failed");
+            }
+            return;
+        }
+    }
+    return;
+}
+
+static int vhost_dev_nvme_start(struct vhost_dev *hdev, VirtIODevice *vdev)
+{
+    int ret;
+
+    /* should only be called after backend is connected */
+    assert(hdev->vhost_ops);
+    hdev->started = true;
+    hdev->vdev = vdev;
+
+    ret = vhost_dev_set_features(hdev, hdev->log_enabled);
+    if (ret < 0) {
+        return ret;
+    }
+
+    if (vdev != NULL) {
+        return -1;
+    }
+    ret = hdev->vhost_ops->vhost_set_mem_table(hdev, hdev->mem);
+    if (ret < 0) {
+        error_report("SET MEMTABLE Failed");
+        return ret;
+    }
+
+    //vhost_user_set_u64(dev, VHOST_USER_NVME_START_STOP, 1);
+    if (hdev->vhost_ops->vhost_dev_start) {
+        ret = hdev->vhost_ops->vhost_dev_start(hdev, vdev);
+        if (ret) {
+        return ret;
+        }
+    }
+
+    return 0;
+}
+
+static int vhost_dev_nvme_stop(struct vhost_dev *hdev)
+{
+    /* should only be called after backend is connected */
+    assert(hdev->vhost_ops);
+
+    if (hdev->vhost_ops->vhost_dev_start) {
+        hdev->vhost_ops->vhost_dev_start(hdev, false);
+    }
+
+    hdev->started = false;
+    hdev->vdev = NULL;
+    return 0;
+}
+
+static int vhost_nvme_vector_unmask(PCIDevice *dev, unsigned vector,
+                                          MSIMessage msg)
+{
+    NvmeCtrl *n = container_of(dev, NvmeCtrl, parent_obj);
+    NvmeCQueue *cq;
+    EventNotifier *e;
+    uint32_t qid;
+    int ret;
+    for (qid = 1; qid <= n->num_io_queues; qid++) {
+        cq = n->cq[qid];
+        if (!cq) {
+            continue;
+        }
+        if (cq->vector == vector) {
+            e = &cq->guest_notifier;
+            ret = kvm_irqchip_update_msi_route(kvm_state, cq->virq, msg, dev);
+            if (ret < 0) {
+                error_report("msi irq update vector %u failed", vector);
+                return ret;
+            }
+            kvm_irqchip_commit_routes(kvm_state);
+            ret = kvm_irqchip_add_irqfd_notifier_gsi(kvm_state, e,
+                                                     NULL, cq->virq);
+            if (ret < 0) {
+                error_report("msi add irqfd gsi vector %u failed, ret %d",
+                             vector, ret);
+                return ret;
+            }
+            return 0;
+        }
+    }
+    return 0;
+}
+
+static void vhost_nvme_vector_poll(PCIDevice *dev,
+                                        unsigned int vector_start,
+                                        unsigned int vector_end)
+{
+    NvmeCtrl *n = container_of(dev, NvmeCtrl, parent_obj);
+    NvmeCQueue *cq;
+    EventNotifier *e;
+    uint32_t qid, vector;
+    for (qid = 1; qid <= n->num_io_queues; qid++) {
+        cq = n->cq[qid];
+        if (!cq) {
+            continue;
+        }
+        vector = cq->vector;
+        if (vector < vector_end && vector >= vector_start) {
+            e = &cq->guest_notifier;
+            if (!msix_is_masked(dev, vector)) {
+                continue;
+            }
+            if (event_notifier_test_and_clear(e)) {
+                msix_set_pending(dev, vector);
+            }
+        }
+    }
 }
 
 static inline void *nvme_addr_to_cmb(NvmeCtrl *n, hwaddr addr)
@@ -1401,6 +1614,7 @@ static uint16_t nvme_create_cq(NvmeCtrl *n, NvmeRequest *req)
     uint16_t qsize = le16_to_cpu(c->qsize);
     uint16_t qflags = le16_to_cpu(c->cq_flags);
     uint64_t prp1 = le64_to_cpu(c->prp1);
+    int ret = 0;
 
     trace_pci_nvme_create_cq(prp1, cqid, vector, qsize, qflags,
                              NVME_CQ_FLAGS_IEN(qflags) != 0);
@@ -1434,6 +1648,32 @@ static uint16_t nvme_create_cq(NvmeCtrl *n, NvmeRequest *req)
     cq = g_malloc0(sizeof(*cq));
     nvme_init_cq(cq, n, prp1, cqid, vector, qsize + 1,
                  NVME_CQ_FLAGS_IEN(qflags));
+
+    if (cq->irq_enabled) {
+        ret = vhost_kernel_nvme_add_kvm_msi_virq(n, cq);
+        if (ret < 0) {
+            error_report("vhost-user-nvme: add kvm msix virq failed");
+            return -1;
+        }
+        ret = vhost_dev_nvme_set_guest_notifier(&n->dev,
+                                                &cq->guest_notifier,
+                                                cq->cqid);
+        if (ret < 0) {
+            error_report("vhost-user-nvme: set guest notifier failed");
+            return -1;
+        }
+    }
+    if (cq->irq_enabled && !n->vector_poll_started) {
+        n->vector_poll_started = true;
+        if (msix_set_vector_notifiers(&n->parent_obj,
+                                      vhost_nvme_vector_unmask,
+                                      vhost_nvme_vector_mask,
+                                      vhost_nvme_vector_poll)) {
+            error_report("vhost-user-nvme: msix_set_vector_notifiers failed");
+            return -1;
+        }
+    }
+
 
     /*
      * It is only required to set qs_created when creating a completion queue;
@@ -2770,6 +3010,8 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
     NvmeCtrl *n = NVME_VHOST(pci_dev);
     NvmeNamespace *ns;
     Error *local_err = NULL;
+    int vhostfd = -1;
+    int ret;
 
     nvme_check_constraints(n, &local_err);
     if (local_err) {
@@ -2777,8 +3019,27 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
         return;
     }
 
-    qbus_create_inplace(&n->bus, sizeof(NvmeBus), TYPE_NVME_BUS,
-                        &pci_dev->qdev, n->parent_obj.qdev.id);
+    if (n->params.vhostfd) {
+        vhostfd = monitor_fd_param(monitor_cur(), n->params.vhostfd, errp);
+        if (vhostfd == -1) {
+            error_prepend(errp, "vhost-kernel-nvme: unable to parse vhostfd: ");
+            return;
+        }
+    } else {
+        vhostfd = open("/dev/vhost-nvme", O_RDWR);
+        if (vhostfd < 0) {
+            error_setg(errp, "vhost-kernel-nvme: open vhost char device failed: %s",
+                       strerror(errno));
+            return;
+        }
+    }
+
+    if (vhost_dev_nvme_init(&n->dev, (void *)(uintptr_t)vhostfd,
+                            VHOST_BACKEND_TYPE_KERNEL, 0) < 0) {
+        error_setg(errp, "vhost-kernel-nvme: vhost_dev_init failed");
+        return;
+    }
+
 
     nvme_init_state(n);
     nvme_init_pci(n, pci_dev, &local_err);

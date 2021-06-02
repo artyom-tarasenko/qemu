@@ -132,6 +132,21 @@ struct vhost_scsi_target {
 
 /* VHOST_VDPA specific definitions */
 
+struct vhost_nvme_target {
+ 	char vhost_wwpn[224]; /* TRANSPORT_IQN_LEN */
+};
+struct nvmet_vhost_eventfd {
+ 	int num;
+ 	int fd;
+ 	int *irq_enabled;
+ 	int *vector;
+};
+struct nvmet_vhost_bar {
+ 	int type; /* read/write */
+ 	uint64_t offset;
+ 	unsigned size;
+ 	uint64_t val;
+};
 struct vhost_vdpa_config {
 	uint32_t off;
 	uint32_t len;

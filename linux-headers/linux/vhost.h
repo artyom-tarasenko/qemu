@@ -146,4 +146,9 @@
 
 /* Set event fd for config interrupt*/
 #define VHOST_VDPA_SET_CONFIG_CALL	_IOW(VHOST_VIRTIO, 0x77, int)
+
+#define VHOST_NVME_SET_ENDPOINT _IOW(VHOST_VIRTIO, 0x45, struct vhost_nvme_target)
+#define VHOST_NVME_CLEAR_ENDPOINT _IOW(VHOST_VIRTIO, 0x46, struct vhost_nvme_target)
+#define VHOST_NVME_SET_EVENTFD _IOW(VHOST_VIRTIO, 0x47, struct nvmet_vhost_eventfd)
+#define VHOST_NVME_BAR _IOW(VHOST_VIRTIO, 0x48, struct nvmet_vhost_bar)
 #endif

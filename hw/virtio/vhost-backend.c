@@ -79,6 +79,29 @@ static int vhost_kernel_scsi_set_endpoint(struct vhost_dev *dev,
     return vhost_kernel_call(dev, VHOST_SCSI_SET_ENDPOINT, target);
 }
 
+static int vhost_kernel_nvme_set_endpoint(struct vhost_dev *dev,
+                                          struct vhost_nvme_target *target)
+{
+    return vhost_kernel_call(dev, VHOST_NVME_SET_ENDPOINT, target);
+}
+
+static int vhost_kernel_nvme_clear_endpoint(struct vhost_dev *dev,
+                                          struct vhost_nvme_target *target)
+{
+    return vhost_kernel_call(dev, VHOST_NVME_CLEAR_ENDPOINT, target);
+}
+
+static int vhost_kernel_nvme_set_eventfd(struct vhost_dev *dev,
+                                          struct nvmet_vhost_eventfd *eventfd)
+{
+    return vhost_kernel_call(dev, VHOST_NVME_SET_EVENTFD, eventfd);
+}
+
+static int vhost_kernel_nvme_bar(struct vhost_dev *dev, struct nvmet_vhost_bar *bar)
+{
+    return vhost_kernel_call(dev, VHOST_NVME_BAR, bar);
+}
+
 static int vhost_kernel_scsi_clear_endpoint(struct vhost_dev *dev,
                                             struct vhost_scsi_target *target)
 {
@@ -317,6 +340,10 @@ static const VhostOps kernel_ops = {
         .vhost_set_owner = vhost_kernel_set_owner,
         .vhost_reset_device = vhost_kernel_reset_device,
         .vhost_get_vq_index = vhost_kernel_get_vq_index,
+        .vhost_nvme_set_endpoint = vhost_kernel_nvme_set_endpoint,
+        .vhost_nvme_clear_endpoint = vhost_kernel_nvme_clear_endpoint,
+        .vhost_nvme_set_eventfd = vhost_kernel_nvme_set_eventfd,
+        .vhost_nvme_bar = vhost_kernel_nvme_bar,
 #ifdef CONFIG_VHOST_VSOCK
         .vhost_vsock_set_guest_cid = vhost_kernel_vsock_set_guest_cid,
         .vhost_vsock_set_running = vhost_kernel_vsock_set_running,

@@ -55,12 +55,14 @@
 #include "qemu/units.h"
 #include "qemu/error-report.h"
 #include "hw/block/block.h"
+#include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
 #include "hw/pci/pci.h"
 #include "hw/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "sysemu/sysemu.h"
 #include "qapi/error.h"
+#include "qemu/error-report.h"
 #include "qapi/visitor.h"
 #include "sysemu/hostmem.h"
 #include "sysemu/block-backend.h"
@@ -71,6 +73,10 @@
 #include "trace.h"
 #include "nvme.h"
 #include "nvme-ns.h"
+#include "sysemu/kvm.h"
+#include "hw/virtio/vhost.h"
+#include "standard-headers/linux/vhost_types.h"
+#include "monitor/monitor.h"
 
 #define NVME_MAX_IOQPAIRS 0xffff
 #define NVME_DB_SIZE  4
@@ -2761,7 +2767,7 @@ static void nvme_init_ctrl(NvmeCtrl *n, PCIDevice *pci_dev)
 
 static void nvme_realize(PCIDevice *pci_dev, Error **errp)
 {
-    NvmeCtrl *n = NVME(pci_dev);
+    NvmeCtrl *n = NVME_VHOST(pci_dev);
     NvmeNamespace *ns;
     Error *local_err = NULL;
 
@@ -2796,7 +2802,7 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
 
 static void nvme_exit(PCIDevice *pci_dev)
 {
-    NvmeCtrl *n = NVME(pci_dev);
+    NvmeCtrl *n = NVME_VHOST(pci_dev);
 
     nvme_clear_ctrl(n);
     g_free(n->cq);
@@ -2814,6 +2820,7 @@ static void nvme_exit(PCIDevice *pci_dev)
 }
 
 static Property nvme_props[] = {
+    DEFINE_PROP_STRING("vhostfd", NvmeCtrl, params.vhostfd),
     DEFINE_BLOCK_PROPERTIES(NvmeCtrl, namespace.blkconf),
     DEFINE_PROP_LINK("pmrdev", NvmeCtrl, pmrdev, TYPE_MEMORY_BACKEND,
                      HostMemoryBackend *),
@@ -2842,6 +2849,8 @@ static void nvme_class_init(ObjectClass *oc, void *data)
     pc->realize = nvme_realize;
     pc->exit = nvme_exit;
     pc->class_id = PCI_CLASS_STORAGE_EXPRESS;
+    pc->vendor_id = PCI_VENDOR_ID_INTEL;
+    pc->device_id = 0x5845;
     pc->revision = 2;
 
     set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
@@ -2852,7 +2861,7 @@ static void nvme_class_init(ObjectClass *oc, void *data)
 
 static void nvme_instance_init(Object *obj)
 {
-    NvmeCtrl *s = NVME(obj);
+    NvmeCtrl *s = NVME_VHOST(obj);
 
     if (s->namespace.blkconf.blk) {
         device_add_bootindex_property(obj, &s->namespace.blkconf.bootindex,
@@ -2862,7 +2871,7 @@ static void nvme_instance_init(Object *obj)
 }
 
 static const TypeInfo nvme_info = {
-    .name          = TYPE_NVME,
+    .name          = TYPE_VHOST_NVME,
     .parent        = TYPE_PCI_DEVICE,
     .instance_size = sizeof(NvmeCtrl),
     .instance_init = nvme_instance_init,
@@ -2873,16 +2882,9 @@ static const TypeInfo nvme_info = {
     },
 };
 
-static const TypeInfo nvme_bus_info = {
-    .name = TYPE_NVME_BUS,
-    .parent = TYPE_BUS,
-    .instance_size = sizeof(NvmeBus),
-};
-
 static void nvme_register_types(void)
 {
     type_register_static(&nvme_info);
-    type_register_static(&nvme_bus_info);
 }
 
 type_init(nvme_register_types)

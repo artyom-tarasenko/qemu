@@ -1840,6 +1840,12 @@ int vhost_dev_nvme_init(struct vhost_dev *hdev, void *opaque,
         goto fail;
     }
 
+    r = hdev->vhost_ops->vhost_set_owner(hdev);
+    if (r < 0) {
+        VHOST_OPS_DEBUG("vhost_set_owner failed");
+        goto fail;
+    }
+
     hdev->memory_listener = (MemoryListener) {
         .begin = vhost_begin,
         .commit = vhost_commit,

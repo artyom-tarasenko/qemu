@@ -181,13 +181,15 @@ static int vhost_dev_nvme_start(struct vhost_dev *hdev, VirtIODevice *vdev)
         return ret;
     }
 
-    if (vdev != NULL) {
-        return -1;
-    }
     ret = hdev->vhost_ops->vhost_set_mem_table(hdev, hdev->mem);
     if (ret < 0) {
         error_report("SET MEMTABLE Failed");
         return ret;
+    }
+
+    if (vdev == NULL) {
+        error_report("vdev is null");
+        return -1;
     }
 
     //vhost_user_set_u64(dev, VHOST_USER_NVME_START_STOP, 1);
@@ -222,7 +224,7 @@ static int vhost_nvme_set_endpoint(NvmeCtrl *n)
     int ret;
 
     info_report("QEMU Start NVMe Controller ...");
-    if (vhost_dev_nvme_start(&n->dev, NULL) < 0) {
+    if (vhost_dev_nvme_start(&n->dev, n->dev.vdev) < 0) {
         error_report("vhost_nvme_set_endpoint: vhost device start failed");
         return -1;
     }

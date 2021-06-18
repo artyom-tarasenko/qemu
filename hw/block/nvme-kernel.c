@@ -180,21 +180,24 @@ static int vhost_dev_nvme_start(struct vhost_dev *hdev, VirtIODevice *vdev)
     if (ret < 0) {
         return ret;
     }
+    info_report("vhost_dev_set_features done \n start vhost_set_mem_table");
 
     ret = hdev->vhost_ops->vhost_set_mem_table(hdev, hdev->mem);
     if (ret < 0) {
         error_report("SET MEMTABLE Failed");
         return ret;
     }
+    info_report("vhost_set_mem_table done");
 
     if (vdev == NULL) {
         error_report("vdev is null");
         return -1;
     }
 
+    info_report("vhost_dev_start");
     //vhost_user_set_u64(dev, VHOST_USER_NVME_START_STOP, 1);
     if (hdev->vhost_ops->vhost_dev_start) {
-        ret = hdev->vhost_ops->vhost_dev_start(hdev, vdev);
+        ret = hdev->vhost_ops->vhost_dev_start(hdev, true);
         if (ret) {
         return ret;
         }
@@ -236,7 +239,7 @@ static int vhost_nvme_set_endpoint(NvmeCtrl *n)
     if (ret < 0) {
         return -errno;
     }
-
+    info_report("vhost_nvme_set_endpoint done");
     return 0;
 }
 
@@ -849,6 +852,7 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
             return;
         }
     }
+    info_report("nvme_realize is finish");
 }
 
 static void nvme_exit(PCIDevice *pci_dev)

@@ -182,16 +182,16 @@ static int vhost_dev_nvme_start(struct vhost_dev *hdev, VirtIODevice *vdev)
     }
     info_report("vhost_dev_set_features done \n start vhost_set_mem_table");
 
-    ret = hdev->vhost_ops->vhost_set_mem_table(hdev, hdev->mem);
-    if (ret < 0) {
-        error_report("SET MEMTABLE Failed");
-        return ret;
-    }
-    info_report("vhost_set_mem_table done");
+//    ret = hdev->vhost_ops->vhost_set_mem_table(hdev, hdev->mem);
+//    if (ret < 0) {
+//        error_report("SET MEMTABLE Failed");
+//        return ret;
+//    }
+//    info_report("vhost_set_mem_table done");
 
-    if (vdev == NULL) {
+  if (vdev == NULL) {
         error_report("vdev is null");
-        return -1;
+//        return -1;
     }
 
     info_report("vhost_dev_start");
@@ -826,7 +826,6 @@ static void nvme_realize(PCIDevice *pci_dev, Error **errp)
         error_setg(errp, "vhost-kernel-nvme: vhost_dev_init failed");
         return;
     }
-
 
     nvme_init_state(n);
     nvme_init_pci(n, pci_dev, &local_err);

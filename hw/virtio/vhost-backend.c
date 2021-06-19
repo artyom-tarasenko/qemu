@@ -122,7 +122,8 @@ static int vhost_kernel_set_log_base(struct vhost_dev *dev, uint64_t base,
 static int vhost_kernel_set_mem_table(struct vhost_dev *dev,
                                       struct vhost_memory *mem)
 {
-    return vhost_kernel_call(dev, VHOST_SET_MEM_TABLE, mem);
+    return 0; // XXX maybe a new type nvme_kernel_ops 
+    //return vhost_kernel_call(dev, VHOST_SET_MEM_TABLE, mem);
 }
 
 static int vhost_kernel_set_vring_addr(struct vhost_dev *dev,

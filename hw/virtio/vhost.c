@@ -279,7 +279,9 @@ static inline void vhost_dev_log_resize(struct vhost_dev *dev, uint64_t size)
 
 static int vhost_dev_has_iommu(struct vhost_dev *dev)
 {
-    return 0;
+    if (!dev->vdev) {
+        return 0;
+    }
     VirtIODevice *vdev = dev->vdev;
 
     /*
